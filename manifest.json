@@ -2,7 +2,7 @@
   "name": "CodeVault",
   "short_name": "CodeVault",
   "description": "CodeVault - Dark Skeuomorphic Media Manager",
-  "start_url": "./CodeVault_v3_fixed.html",
+  "start_url": "./index.html",
   "scope": "./",
   "display": "standalone",
   "background_color": "#070809",

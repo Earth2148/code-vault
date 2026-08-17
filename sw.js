@@ -1,8 +1,8 @@
-const CACHE_NAME = 'codevault-v3-fixed-v1';
+const CACHE_NAME = 'codevault-v3-index-v2';
 
 const APP_SHELL = [
   './',
-  './CodeVault_v3_fixed.html',
+  './index.html',
   './manifest.json'
 ];
 
@@ -56,7 +56,7 @@ self.addEventListener('fetch', event => {
         .catch(() => {
           // For navigation requests, fall back to the cached app shell.
           if (request.mode === 'navigate') {
-            return caches.match('./CodeVault_v3_fixed.html');
+            return caches.match('./index.html');
           }
 
           return new Response('', {
