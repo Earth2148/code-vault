@@ -22,7 +22,7 @@
     /* Register Service Worker for PWA Offline Support */
     if ('serviceWorker' in navigator) {
       window.addEventListener('load', () => {
-        navigator.serviceWorker.register('sw.js').catch(err => console.log('SW registration failed:', err));
+        navigator.serviceWorker.register('sw.js').catch(err => console.warn('SW registration failed. ตรวจสอบว่า sw.js มีอยู่จริงและเปิดผ่าน HTTPS/localhost:', err));
       });
     }
 
@@ -593,7 +593,7 @@
               <i class="fa-solid fa-download text-brand-orange text-lg"></i>
               <div>
                 <h3 class="text-xs font-bold text-white">ติดตั้งแอปพลิเคชัน (PWA)</h3>
-                <p class="text-[10px] text-slate-400">เพิ่มลงหน้าจอโฮมเพื่อใช้งานออฟไลน์</p>
+                <p class="text-[10px] text-slate-400">เพิ่มลงหน้าจอโฮมเพื่อใช้งานออฟไลน์ • ต้องมี manifest.json และ sw.js</p>
               </div>
             </div>
             <button @click="installPWA" class="btn-orange-skeuo px-3.5 py-1.5 rounded-xl text-xs font-bold">
@@ -607,7 +607,7 @@
             <button @click="promptChangePin" class="w-full flex items-center justify-between p-3 rounded-xl btn-dark-skeuo border border-slate-800 text-left">
               <div class="flex items-center gap-3">
                 <i class="fa-solid fa-key text-brand-orange text-sm"></i>
-                <span class="text-xs font-bold text-slate-200">เปลี่ยนรหัส PIN (ปัจจุบัน: {{ pinCode }})</span>
+                <span class="text-xs font-bold text-slate-200">เปลี่ยนรหัส PIN</span>
               </div>
               <i class="fa-solid fa-chevron-right text-xs text-slate-500"></i>
             </button>
@@ -691,12 +691,20 @@
   <script>
     const { createApp, ref, computed, onMounted, watch } = Vue;
 
+    const PIN_STORAGE_KEY = 'codevault_pin_hash';
+    const DEFAULT_PIN = '1234';
+    const sha256 = async (value) => {
+      const data = new TextEncoder().encode(value);
+      const hash = await crypto.subtle.digest('SHA-256', data);
+      return Array.from(new Uint8Array(hash)).map(b => b.toString(16).padStart(2, '0')).join('');
+    };
+
     createApp({
       setup() {
         // App Security & Lock State
         const isLocked = ref(true);
         const pinInput = ref('');
-        const pinCode = ref(localStorage.getItem('codevault_pin') || '1234');
+        const pinHash = ref(localStorage.getItem(PIN_STORAGE_KEY) || '');
         const pinError = ref(false);
 
         // Global Blur Switch (Default TRUE for Privacy)
@@ -749,7 +757,43 @@
         };
 
         const handleImgError = (event, code) => {
-          event.target.src = getFallbackImage(code);
+          const fallback = getFallbackImage(code);
+          if (event.target.dataset.fallbackApplied === '1' || event.target.src === fallback) {
+            event.target.style.visibility = 'hidden';
+            return;
+          }
+          event.target.dataset.fallbackApplied = '1';
+          event.target.src = fallback;
+        };
+
+        // Data validation / normalization
+        const normalizeItem = (raw, index = 0) => {
+          const item = raw && typeof raw === 'object' ? raw : {};
+          const tags = Array.isArray(item.tags)
+            ? item.tags.filter(t => typeof t === 'string').map(t => t.trim()).filter(Boolean)
+            : (typeof item.tags === 'string' && item.tags.trim() ? [item.tags.trim()] : []);
+          const rating = Number(item.rating);
+          const createdAt = Number(item.createdAt);
+
+          return {
+            id: String(item.id ?? `${Date.now()}-${index}`),
+            code: String(item.code ?? '').trim().toUpperCase(),
+            title: String(item.title ?? ''),
+            imageUrl: String(item.imageUrl ?? ''),
+            actress: String(item.actress ?? ''),
+            studio: String(item.studio ?? 'GENERAL').trim(),
+            tags,
+            status: item.status === 'WATCHED' ? 'WATCHED' : 'PLAN',
+            rating: Number.isFinite(rating) ? Math.min(5, Math.max(0, Math.round(rating))) : 3,
+            isFavorite: Boolean(item.isFavorite),
+            isBlur: item.isBlur !== false,
+            createdAt: Number.isFinite(createdAt) ? createdAt : Date.now() - index
+          };
+        };
+
+        const validateImportedData = (value) => {
+          if (!Array.isArray(value)) throw new Error('ข้อมูลต้องเป็น Array');
+          return value.map((item, index) => normalizeItem(item, index));
         };
 
         // Load Initial Saved Data
@@ -757,7 +801,7 @@
           const saved = localStorage.getItem('codevault_data');
           if (saved) {
             try { 
-              items.value = JSON.parse(saved); 
+              items.value = validateImportedData(JSON.parse(saved));
               return; 
             } catch(e) {}
           }
@@ -786,13 +830,19 @@
         const deletePin = () => { pinInput.value = pinInput.value.slice(0, -1); };
         const clearPin = () => { pinInput.value = ''; };
         
-        const verifyPin = () => {
-          if (pinInput.value === pinCode.value) { 
-            isLocked.value = false; 
-            pinInput.value = ''; 
-          } else { 
-            pinError.value = true; 
-            setTimeout(() => { pinInput.value = ''; }, 400); 
+        const verifyPin = async () => {
+          const currentHash = pinHash.value || await sha256(DEFAULT_PIN);
+          if (pinInput.value === (pinHash.value ? '' : DEFAULT_PIN) || await sha256(pinInput.value) === currentHash) {
+            isLocked.value = false;
+            pinInput.value = '';
+            pinError.value = false;
+            if (!pinHash.value) {
+              pinHash.value = currentHash;
+              localStorage.setItem(PIN_STORAGE_KEY, currentHash);
+            }
+          } else {
+            pinError.value = true;
+            setTimeout(() => { pinInput.value = ''; }, 400);
           }
         };
         
@@ -801,11 +851,11 @@
           pinInput.value = ''; 
         };
         
-        const promptChangePin = () => {
-          const newPin = prompt('กรอกรหัส PIN ใหม่ 4 หลัก:', pinCode.value);
-          if (newPin && newPin.length === 4 && !isNaN(newPin)) {
-            pinCode.value = newPin;
-            localStorage.setItem('codevault_pin', newPin);
+        const promptChangePin = async () => {
+          const newPin = prompt('กรอกรหัส PIN ใหม่ 4 หลัก:');
+          if (newPin && /^\d{4}$/.test(newPin)) {
+            pinHash.value = await sha256(newPin);
+            localStorage.setItem(PIN_STORAGE_KEY, pinHash.value);
             alert('เปลี่ยนรหัส PIN สำเร็จ!');
           } else if (newPin) {
             alert('โปรดกรอกตัวเลข 4 หลักเท่านั้น');
@@ -821,13 +871,14 @@
         const onCodeInput = () => {
           const raw = form.value.code.toUpperCase().trim();
           form.value.code = raw;
-          const match = raw.match(/^([A-Z0-9]+)/);
-          if (match && match[1]) {
-            const prefix = match[1];
-            form.value.studio = studioMap[prefix] || prefix;
-            detectedStudio.value = studioMap[prefix] || prefix;
-          } else { 
-            detectedStudio.value = ''; 
+          const prefix = raw.split(/[-_\s]/)[0];
+          if (prefix) {
+            const studio = studioMap[prefix] || Object.entries(studioMap)
+              .find(([key]) => raw.startsWith(key))?.[1] || '';
+            form.value.studio = studio || form.value.studio || 'GENERAL';
+            detectedStudio.value = studio || '';
+          } else {
+            detectedStudio.value = '';
           }
         };
 
@@ -853,8 +904,8 @@
             if (idx >= 0) items.value[idx] = { ...form.value };
           } else {
             items.value.unshift({ 
-              ...form.value, 
-              id: Date.now().toString(), 
+              ...normalizeItem(form.value),
+              id: Date.now().toString(),
               createdAt: Date.now(),
               isBlur: true 
             });
@@ -910,13 +961,13 @@
               (i.title || '').toLowerCase().includes(q) || 
               (i.actress || '').toLowerCase().includes(q) || 
               (i.studio || '').toLowerCase().includes(q) ||
-              (i.tags || []).some(t => t.toLowerCase().includes(q))
+              (Array.isArray(i.tags) ? i.tags : []).some(t => String(t).toLowerCase().includes(q))
             );
           }
 
-          if (sortBy.value === 'newest') list.sort((a, b) => b.createdAt - a.createdAt);
-          else if (sortBy.value === 'code') list.sort((a, b) => a.code.localeCompare(b.code));
-          else if (sortBy.value === 'rating') list.sort((a, b) => b.rating - a.rating);
+          if (sortBy.value === 'newest') list.sort((a, b) => Number(b.createdAt || 0) - Number(a.createdAt || 0));
+          else if (sortBy.value === 'code') list.sort((a, b) => String(a.code || '').localeCompare(String(b.code || '')));
+          else if (sortBy.value === 'rating') list.sort((a, b) => Number(b.rating || 0) - Number(a.rating || 0));
           
           return list;
         });
@@ -947,18 +998,19 @@
         };
 
         const importData = (event) => {
-          const file = event.target.files[0]; 
+          const file = event.target.files[0];
           if (!file) return;
           const reader = new FileReader();
           reader.onload = (e) => {
-            try { 
-              const imported = JSON.parse(e.target.result); 
-              if (Array.isArray(imported)) {
-                items.value = imported; 
-                alert('นำเข้าข้อมูลสำเร็จแล้ว!'); 
-              }
-            } catch(err) { 
-              alert('ไฟล์ JSON ไม่ถูกต้อง'); 
+            try {
+              const imported = JSON.parse(e.target.result);
+              items.value = validateImportedData(imported);
+              alert(`นำเข้าข้อมูลสำเร็จแล้ว ${items.value.length} รายการ`);
+            } catch(err) {
+              console.error('Import validation failed:', err);
+              alert('ไฟล์ JSON ไม่ถูกต้อง หรือโครงสร้างข้อมูลไม่รองรับ');
+            } finally {
+              event.target.value = '';
             }
           };
           reader.readAsText(file);
@@ -986,13 +1038,17 @@
           }
         };
 
-        onMounted(() => { 
-          loadInitialData(); 
-          setupPWA(); 
+        onMounted(async () => {
+          if (!localStorage.getItem(PIN_STORAGE_KEY)) {
+            localStorage.setItem(PIN_STORAGE_KEY, await sha256(DEFAULT_PIN));
+            pinHash.value = localStorage.getItem(PIN_STORAGE_KEY);
+          }
+          loadInitialData();
+          setupPWA();
         });
 
         return {
-          isLocked, pinInput, pinCode, pinError, appendPin, deletePin, clearPin, lockApp, promptChangePin,
+          isLocked, pinInput, pinError, appendPin, deletePin, clearPin, lockApp, promptChangePin,
           globalBlurMode, toggleItemBlur, activeTab, searchQuery, activeStatusFilter, sortBy, 
           items, filteredItems, actressesList, presetTags, form, customTagInput, detectedStudio,
           getFallbackImage, handleImgError, onCodeInput, toggleTagInForm, addCustomTag, 
