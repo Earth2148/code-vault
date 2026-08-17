@@ -1,0 +1,25 @@
+{
+  "name": "CodeVault",
+  "short_name": "CodeVault",
+  "description": "CodeVault - Dark Skeuomorphic Media Manager",
+  "start_url": "./CodeVault_v3_fixed.html",
+  "scope": "./",
+  "display": "standalone",
+  "background_color": "#070809",
+  "theme_color": "#ea580c",
+  "orientation": "portrait",
+  "icons": [
+    {
+      "src": "av-logo.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "av-logo.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any maskable"
+    }
+  ]
+}
